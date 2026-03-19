@@ -1,4 +1,4 @@
-!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1555,12 +1555,660 @@
     <a href="#" class="contact-link">⌂ GITHUB</a>
     <a href="#" class="contact-link">↓ RÉSUMÉ</a>
   </div>
-  <div class="footer-bottom">
-    © 2026 &nbsp;·&nbsp; CRAFTED IN GUWAHATI, ASSAM &nbsp;·&nbsp; POWERED BY COFFEE &amp; LOCAL LLMS
-  </div>
 </section>
 
+<!-- ── BIKER FOOTER ── -->
+<footer id="bikerFooter">
+  <canvas id="bikerCanvas"></canvas>
+  <div class="bfooter-bottom pixel">
+    © 2026 &nbsp;·&nbsp; CRAFTED IN GUWAHATI, ASSAM &nbsp;·&nbsp; POWERED BY COFFEE &amp; LOCAL LLMS
+  </div>
+</footer>
+
+<style>
+  #bikerFooter {
+    position: relative;
+    border-top: 2px solid var(--border);
+    background: #020810;
+    cursor: pointer;
+    user-select: none;
+  }
+  #bikerCanvas { display: block; width: 100%; height: 200px; }
+  .bfooter-bottom {
+    text-align: center;
+    font-size: 7px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 1rem 0 1.4rem;
+    opacity: 0.5;
+  }
+</style>
+
 <script>
+(function(){
+  const footer = document.getElementById('bikerFooter');
+  const canvas = document.getElementById('bikerCanvas');
+  const ctx    = canvas.getContext('2d');
+  let W, H, groundY;
+  let speed = 2.8, targetSpd = 2.8, boosted = false;
+
+  function resize(){
+    W = canvas.offsetWidth;
+    H = canvas.offsetHeight;
+    canvas.width  = W * devicePixelRatio;
+    canvas.height = H * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    groundY = Math.round(H * 0.70);
+  }
+  resize();
+  window.addEventListener('resize', () => { resize(); });
+
+  footer.addEventListener('mouseenter', () => { boosted=true;  targetSpd=8; });
+  footer.addEventListener('mouseleave', () => { boosted=false; targetSpd=2.8; });
+
+  /* ── TERRAIN SYSTEM ── */
+  const TYPES = ['flat','flat','mountain','mountain','bridge','offroad','offroad','river','trees','trees','flat'];
+  let   typeIdx = 0;
+  const SEG_WIDTHS = { flat:300, mountain:460, bridge:280, offroad:260, river:240, trees:360 };
+
+  let segments = [], segCursor = 0;
+
+  function makeSegment(type, sx){
+    const w = SEG_WIDTHS[type] + (Math.random()*80|0);
+    const pts = [], props = {};
+
+    if(type==='flat'){
+      pts.push({x:sx,y:groundY},{x:sx+w,y:groundY});
+    }
+    else if(type==='mountain'){
+      const ph = 55 + Math.random()*60;
+      const mid = sx + w/2;
+      pts.push({x:sx,y:groundY});
+      pts.push({x:sx+w*.18,y:groundY-18});
+      pts.push({x:mid-w*.08,y:groundY-ph*.65});
+      pts.push({x:mid,y:groundY-ph});
+      pts.push({x:mid+w*.08,y:groundY-ph*.65});
+      pts.push({x:sx+w*.82,y:groundY-18});
+      pts.push({x:sx+w,y:groundY});
+    }
+    else if(type==='bridge'){
+      const bh = 26 + Math.random()*18;
+      props.bh=bh; props.bx1=sx+28; props.bx2=sx+w-28; props.by=groundY-bh;
+      pts.push({x:sx,y:groundY});
+      pts.push({x:sx+28,y:groundY-bh});
+      pts.push({x:sx+w-28,y:groundY-bh});
+      pts.push({x:sx+w,y:groundY});
+    }
+    else if(type==='offroad'){
+      const bumps=5+(Math.random()*4|0);
+      for(let i=0;i<=bumps;i++){
+        pts.push({x:sx+i*(w/bumps), y:groundY-(i%2===0?0:9+Math.random()*13)});
+      }
+    }
+    else if(type==='river'){
+      props.rx1=sx+18; props.rx2=sx+w-18;
+      pts.push({x:sx,y:groundY},{x:sx+18,y:groundY},{x:sx+36,y:groundY+16},{x:sx+w-36,y:groundY+16},{x:sx+w-18,y:groundY},{x:sx+w,y:groundY});
+    }
+    else if(type==='trees'){
+      pts.push({x:sx,y:groundY},{x:sx+w,y:groundY});
+      const cnt=3+(Math.random()*4|0);
+      props.trees=[];
+      for(let i=0;i<cnt;i++){
+        props.trees.push({x:sx+50+Math.random()*(w-100), h:38+Math.random()*38, tk:5+Math.random()*5});
+      }
+    }
+    return {type,pts,width:w,startX:sx,props};
+  }
+
+  /* pre-fill 3 screens */
+  while(segCursor < W*3){
+    const t = TYPES[typeIdx++ % TYPES.length];
+    const s = makeSegment(t, segCursor);
+    segments.push(s);
+    segCursor += s.width;
+  }
+
+  /* ── PARALLAX ── */
+  const farPeaks = Array.from({length:7},(_,i)=>({x:i*(W/3.8),h:55+Math.random()*55,w:90+Math.random()*80}));
+  const midHills = Array.from({length:6},(_,i)=>({x:i*(W/3),h:28+Math.random()*22,w:130+Math.random()*80}));
+
+  /* ── BIKER STATE ── */
+  const BX = W * 0.17;
+  let bikerY=groundY, bikerVY=0, wheelAngle=0, bobPhase=0;
+
+  /* ── PARTICLES ── */
+  let particles=[];
+  function addParticle(){
+    if(Math.random()>0.45) return;
+    particles.push({x:BX-14, y:bikerY-8+Math.random()*12, vx:-(1.5+Math.random()*3)*(speed/2.8), vy:(Math.random()-.5)*.7, life:1});
+  }
+
+  /* ── STARS ── */
+  const stars = Array.from({length:38},()=>({x:Math.random()*1,y:Math.random(),r:.5+Math.random()*1.2,tw:Math.random()*6.28}));
+
+  /* ── SCROLL ── */
+  let scrollX = 0;
+  const sx = wx => wx - scrollX;
+
+  function groundAt(wx){
+    for(const seg of segments){
+      if(wx<seg.startX||wx>seg.startX+seg.width) continue;
+      const pts=seg.pts;
+      for(let i=0;i<pts.length-1;i++){
+        if(wx>=pts[i].x && wx<=pts[i+1].x){
+          const t2=(wx-pts[i].x)/(pts[i+1].x-pts[i].x);
+          return pts[i].y + t2*(pts[i+1].y-pts[i].y);
+        }
+      }
+    }
+    return groundY;
+  }
+
+  /* ── DRAW SKY ── */
+  function drawSky(){
+    const g=ctx.createLinearGradient(0,0,0,groundY);
+    g.addColorStop(0,'#010710');
+    g.addColorStop(1,'#081828');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  }
+
+  /* ── DRAW STARS ── */
+  function drawStars(dt){
+    stars.forEach(s=>{
+      s.tw+=dt*.9;
+      const a=.35+.35*Math.sin(s.tw);
+      ctx.fillStyle=`rgba(180,220,255,${a})`;
+      ctx.beginPath(); ctx.arc(s.x*W, s.y*groundY*.85, s.r,0,Math.PI*2); ctx.fill();
+    });
+  }
+
+  /* ── FAR MOUNTAINS ── */
+  function drawFarMtns(){
+    farPeaks.forEach(m=>{
+      m.x -= speed*.07;
+      if(m.x+m.w<0) m.x=W+m.w;
+      ctx.fillStyle='#0c1e2e';
+      ctx.beginPath(); ctx.moveTo(m.x,groundY); ctx.lineTo(m.x+m.w*.5,groundY-m.h); ctx.lineTo(m.x+m.w,groundY); ctx.fill();
+      ctx.fillStyle='#162d40';
+      ctx.beginPath(); ctx.moveTo(m.x+m.w*.42,groundY-m.h*.72); ctx.lineTo(m.x+m.w*.5,groundY-m.h); ctx.lineTo(m.x+m.w*.58,groundY-m.h*.72); ctx.fill();
+    });
+  }
+
+  /* ── MID HILLS ── */
+  function drawMidHills(){
+    midHills.forEach(h=>{
+      h.x -= speed*.18;
+      if(h.x+h.w<0) h.x=W+h.w;
+      ctx.fillStyle='#0d2518';
+      ctx.beginPath(); ctx.moveTo(h.x,groundY); ctx.quadraticCurveTo(h.x+h.w*.5,groundY-h.h,h.x+h.w,groundY); ctx.fill();
+    });
+  }
+
+  /* ── DRAW SEGMENT ── */
+  function drawSeg(seg){
+    const p=seg.pts, t=seg.type, pr=seg.props;
+
+    if(t==='river'){
+      ctx.fillStyle='#06121e';
+      ctx.beginPath(); ctx.moveTo(sx(p[0].x),p[0].y);
+      p.forEach(q=>ctx.lineTo(sx(q.x),q.y));
+      ctx.lineTo(sx(p[p.length-1].x),H); ctx.lineTo(sx(p[0].x),H); ctx.fill();
+      ctx.fillStyle='#094462';
+      ctx.beginPath();
+      ctx.moveTo(sx(p[1].x),p[1].y); ctx.lineTo(sx(p[2].x),p[2].y); ctx.lineTo(sx(p[3].x),p[3].y); ctx.lineTo(sx(p[4].x),p[4].y); ctx.fill();
+      ctx.strokeStyle='rgba(0,200,255,.15)'; ctx.lineWidth=1;
+      for(let i=0;i<4;i++){ const ry=p[2].y+2+i*4; ctx.beginPath(); ctx.moveTo(sx(pr.rx1)+8,ry); ctx.lineTo(sx(pr.rx2)-8,ry); ctx.stroke(); }
+    }
+
+    if(t==='bridge'){
+      const bx1=sx(pr.bx1),bx2=sx(pr.bx2),by=pr.by,mid=(bx1+bx2)/2;
+      ctx.strokeStyle='#1e4a6a'; ctx.lineWidth=5;
+      [bx1+16,mid,bx2-16].forEach(px=>{ ctx.beginPath(); ctx.moveTo(px,by); ctx.lineTo(px,groundY); ctx.stroke(); });
+      ctx.strokeStyle='#2a6888'; ctx.lineWidth=5;
+      ctx.beginPath(); ctx.moveTo(bx1,by); ctx.lineTo(bx2,by); ctx.stroke();
+      ctx.strokeStyle='rgba(0,200,255,.25)'; ctx.lineWidth=1;
+      [.25,.5,.75].forEach(f=>{ const cx=bx1+(bx2-bx1)*f; ctx.beginPath(); ctx.moveTo(mid,by-20); ctx.lineTo(cx,by); ctx.stroke(); });
+      ctx.strokeStyle='#2a6888'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(mid,by); ctx.lineTo(mid,by-24); ctx.stroke();
+    }
+
+    if(t==='trees' && pr.trees){
+      pr.trees.forEach(tr=>{
+        const tx=sx(tr.x);
+        if(tx<-60||tx>W+60) return;
+        ctx.fillStyle='#1a0f05'; ctx.fillRect(tx-tr.tk/2, groundY-tr.h*.4, tr.tk, tr.h*.4);
+        [[0,'#0c3416'],[.22,'#0e4020'],[.46,'#104a28']].forEach(([off,c])=>{
+          const cy=groundY-tr.h*(.4+off*.55), cw=tr.h*(.55-off*.28);
+          ctx.fillStyle=c; ctx.beginPath(); ctx.moveTo(tx,cy-tr.h*.28*(1-off)); ctx.lineTo(tx-cw,cy); ctx.lineTo(tx+cw,cy); ctx.fill();
+        });
+      });
+    }
+
+    /* ground body */
+    ctx.fillStyle = t==='offroad'?'#18110a':'#081508';
+    ctx.beginPath(); ctx.moveTo(sx(p[0].x),p[0].y);
+    p.forEach(q=>ctx.lineTo(sx(q.x),q.y));
+    ctx.lineTo(sx(p[p.length-1].x),H); ctx.lineTo(sx(p[0].x),H); ctx.fill();
+
+    /* ground line */
+    ctx.strokeStyle = t==='offroad'?'#3a280e':'#183a18'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(sx(p[0].x),p[0].y); p.forEach(q=>ctx.lineTo(sx(q.x),q.y)); ctx.stroke();
+
+    /* offroad rocks */
+    if(t==='offroad'){
+      for(let i=0;i<5;i++){
+        const rx=sx(seg.startX+25+i*(seg.width/5.5));
+        const ry=groundAt(seg.startX+25+i*(seg.width/5.5))-2;
+        ctx.fillStyle='#28201a'; ctx.beginPath(); ctx.ellipse(rx,ry,5,3,.3,0,Math.PI*2); ctx.fill();
+      }
+    }
+  }
+
+  /* ── DRAW BIKER ── */
+  function drawBiker(t){
+    const bob = Math.sin(bobPhase) * (boosted ? 1.4 : 0.9);
+    const leanAmt = boosted ? 0.30 : 0.18; /* forward lean of whole bike */
+    ctx.save();
+    ctx.translate(BX, bikerY + bob);
+    ctx.rotate(leanAmt * 0.08); /* very subtle whole-body pitch */
+
+    const S = 1.45; /* global scale — bigger bike */
+    ctx.scale(S, S);
+
+    /* helper: filled path */
+    const fp = (fn, col) => { ctx.fillStyle=col; ctx.beginPath(); fn(); ctx.fill(); };
+    const sp = (fn, col, lw) => { ctx.strokeStyle=col; ctx.lineWidth=lw; ctx.beginPath(); fn(); ctx.stroke(); };
+
+    /* ── WHEELS ── */
+    function wheel(cx, cy, R){
+      /* tyre – thick rubber */
+      sp(()=>{ ctx.arc(cx,cy,R,0,Math.PI*2); }, '#1a2830', 9);
+      sp(()=>{ ctx.arc(cx,cy,R,0,Math.PI*2); }, '#2e4455', 2);
+      /* brake disc */
+      sp(()=>{ ctx.arc(cx,cy,R-5,0,Math.PI*2); }, '#3a5060', 1.5);
+      /* 10-spoke alloy rim */
+      ctx.strokeStyle='rgba(0,220,255,.55)'; ctx.lineWidth=1.2;
+      for(let i=0;i<10;i++){
+        const a=wheelAngle+i*Math.PI/5;
+        ctx.beginPath();
+        ctx.moveTo(cx+Math.cos(a)*3, cy+Math.sin(a)*3);
+        ctx.lineTo(cx+Math.cos(a)*(R-6), cy+Math.sin(a)*(R-6));
+        ctx.stroke();
+      }
+      /* rim ring */
+      sp(()=>{ ctx.arc(cx,cy,R-6,0,Math.PI*2); }, '#00e5ff', 1.8);
+      /* hub */
+      fp(()=>{ ctx.arc(cx,cy,5,0,Math.PI*2); }, '#00e5ff');
+      fp(()=>{ ctx.arc(cx,cy,2.5,0,Math.PI*2); }, '#020810');
+    }
+    wheel(-26, 0, 18); /* rear */
+    wheel( 26, 0, 18); /* front */
+
+    /* ── REAR SWING ARM ── */
+    sp(()=>{ ctx.moveTo(-10,-4); ctx.lineTo(-26,0); }, '#3a5868', 5);
+    sp(()=>{ ctx.moveTo(-10,-4); ctx.lineTo(-26,0); }, '#4a6878', 2);
+
+    /* ── TWIN EXHAUSTS (under-belly, sport style) ── */
+    /* outer can */
+    sp(()=>{ ctx.moveTo(-20,10); ctx.quadraticCurveTo(-4,16, 8,12); }, '#3a4a50', 5);
+    sp(()=>{ ctx.moveTo(-20,10); ctx.quadraticCurveTo(-4,16, 8,12); }, '#5a7080', 2);
+    /* inner can */
+    sp(()=>{ ctx.moveTo(-20,13); ctx.quadraticCurveTo(-4,18, 6,14); }, '#2e3e46', 4);
+    /* can ends */
+    fp(()=>{ ctx.ellipse(-20,11,3,5,-.3,0,Math.PI*2); }, '#223040');
+    fp(()=>{ ctx.ellipse(-20,11,2,3.5,-.3,0,Math.PI*2); }, '#0a1820');
+    /* exhaust glow / smoke */
+    if(boosted){
+      const ef = .28+.28*Math.sin(t*10);
+      fp(()=>{ ctx.ellipse(-30,10,12,7,-.25,0,Math.PI*2); }, `rgba(100,110,130,${ef})`);
+      fp(()=>{ ctx.ellipse(-26,10,7,4.5,-.15,0,Math.PI*2); }, `rgba(255,120,40,${ef*.7})`);
+    } else {
+      fp(()=>{ ctx.ellipse(-26,10,5,3,-.15,0,Math.PI*2); }, 'rgba(80,95,110,.15)');
+    }
+
+    /* ── FRAME SPARS (exposed trellis) ── */
+    ctx.lineCap='round';
+    sp(()=>{ ctx.moveTo(-12,-20); ctx.lineTo(10,-22); }, '#4e6878', 4);
+    sp(()=>{ ctx.moveTo(10,-22); ctx.lineTo(8,-2); }, '#4e6878', 4);
+    sp(()=>{ ctx.moveTo(-12,-20); ctx.lineTo(-8,-3); }, '#4e6878', 4);
+    sp(()=>{ ctx.moveTo(-8,-3); ctx.lineTo(8,-2); }, '#3a5060', 3);
+    ctx.lineCap='butt';
+
+    /* ── ENGINE / INLINE-4 BLOCK ── */
+    fp(()=>{
+      ctx.moveTo(-14,-2); ctx.lineTo(-14,-18);
+      ctx.lineTo(8,-18); ctx.lineTo(8,-2); ctx.closePath();
+    }, '#182838');
+    /* block detail */
+    sp(()=>{
+      ctx.moveTo(-14,-2); ctx.lineTo(-14,-18);
+      ctx.lineTo(8,-18); ctx.lineTo(8,-2); ctx.closePath();
+    }, '#2a4050', 1);
+    /* cylinder head fins */
+    ctx.strokeStyle='#243848'; ctx.lineWidth=1;
+    for(let i=0;i<5;i++){ ctx.beginPath(); ctx.moveTo(-13,-4-i*2.5); ctx.lineTo(7,-4-i*2.5); ctx.stroke(); }
+    /* intake airbox */
+    fp(()=>{ ctx.rect(-2,-22,8,5); }, '#101e2c');
+
+    /* ── FULL BODY FAIRING ── */
+    /* --- main lower fairing belly pan --- */
+    fp(()=>{
+      ctx.moveTo(-24,2);
+      ctx.bezierCurveTo(-20,14, 0,16, 14,10);
+      ctx.bezierCurveTo(18,6, 20,2, 20,2);
+      ctx.lineTo(8,-2);
+      ctx.bezierCurveTo(2,0, -8,0, -14,-2);
+      ctx.closePath();
+    }, '#0d2030');
+    /* belly-pan accent stripe */
+    fp(()=>{
+      ctx.moveTo(-18,4);
+      ctx.bezierCurveTo(-14,12, 2,14, 12,9);
+      ctx.bezierCurveTo(14,7,15,5,14,4);
+      ctx.bezierCurveTo(8,6,-8,6,-18,4);
+    }, 'rgba(0,229,255,.1)');
+
+    /* --- upper fairing / tank cover --- */
+    fp(()=>{
+      ctx.moveTo(-14,-20);
+      ctx.bezierCurveTo(-18,-30, -4,-34, 8,-30);
+      ctx.bezierCurveTo(14,-26, 14,-20, 10,-18);
+      ctx.bezierCurveTo(4,-16, -8,-16, -14,-20);
+    }, '#0e2232');
+    /* tank racing livery stripe */
+    fp(()=>{
+      ctx.moveTo(-8,-30);
+      ctx.bezierCurveTo(-2,-36, 6,-35, 10,-30);
+      ctx.bezierCurveTo(8,-26, 0,-26, -6,-28);
+      ctx.closePath();
+    }, 'rgba(0,229,255,.14)');
+    /* tank edge line */
+    sp(()=>{
+      ctx.moveTo(-14,-20);
+      ctx.bezierCurveTo(-18,-30, -4,-34, 8,-30);
+      ctx.bezierCurveTo(14,-26, 14,-20, 10,-18);
+    }, '#00e5ff', 1);
+
+    /* --- upper fairing nose / windscreen --- */
+    fp(()=>{
+      ctx.moveTo(10,-18);
+      ctx.bezierCurveTo(16,-20, 24,-16, 26,-10);
+      ctx.bezierCurveTo(26,-4, 22,-2, 18,-2);
+      ctx.bezierCurveTo(16,0, 12,-4, 10,-10);
+      ctx.closePath();
+    }, '#0c1e2c');
+    /* windscreen tint */
+    fp(()=>{
+      ctx.moveTo(12,-17);
+      ctx.bezierCurveTo(16,-20, 22,-14, 22,-10);
+      ctx.bezierCurveTo(22,-6, 18,-4, 14,-8);
+      ctx.bezierCurveTo(12,-12, 12,-16, 12,-17);
+    }, 'rgba(0,200,255,.22)');
+    /* windscreen glint */
+    fp(()=>{
+      ctx.moveTo(13,-18); ctx.bezierCurveTo(16,-20,21,-16,20,-13);
+      ctx.bezierCurveTo(19,-11,16,-14,13,-18);
+    }, 'rgba(180,240,255,.18)');
+
+    /* --- nose fairing / ram-air intake --- */
+    fp(()=>{
+      ctx.moveTo(22,-10);
+      ctx.bezierCurveTo(28,-8, 30,-4, 28,0);
+      ctx.bezierCurveTo(26,4, 20,4, 18,0);
+      ctx.bezierCurveTo(16,-4, 18,-10, 22,-10);
+    }, '#0a1c2a');
+    /* ram-air duct */
+    fp(()=>{
+      ctx.moveTo(24,-6);
+      ctx.bezierCurveTo(27,-5,28,-2,27,1);
+      ctx.bezierCurveTo(26,3,23,3,22,1);
+      ctx.bezierCurveTo(21,-1,22,-6,24,-6);
+    }, '#061018');
+
+    /* ── TWIN HEADLIGHTS (angular, race-style) ── */
+    fp(()=>{
+      ctx.moveTo(25,-8); ctx.lineTo(29,-6); ctx.lineTo(28,-2); ctx.lineTo(24,-1); ctx.closePath();
+    }, '#081420');
+    fp(()=>{
+      ctx.moveTo(26,-7); ctx.lineTo(28,-6); ctx.lineTo(27.5,-3); ctx.lineTo(25.5,-2.5); ctx.closePath();
+    }, 'rgba(0,229,255,.9)');
+    fp(()=>{
+      ctx.moveTo(25,-4); ctx.lineTo(29,0); ctx.lineTo(28,4); ctx.lineTo(23,2); ctx.closePath();
+    }, '#081420');
+    fp(()=>{
+      ctx.moveTo(25.5,-3); ctx.lineTo(28,-1); ctx.lineTo(27.5,2.5); ctx.lineTo(24,1.5); ctx.closePath();
+    }, 'rgba(0,229,255,.85)');
+
+    /* headlight beam */
+    const ba = .14+.04*Math.sin(t*2.5);
+    const bg = ctx.createLinearGradient(28,0,85,0);
+    bg.addColorStop(0, `rgba(0,229,255,${ba+.08})`);
+    bg.addColorStop(1, 'rgba(0,229,255,0)');
+    ctx.fillStyle=bg;
+    ctx.beginPath(); ctx.moveTo(27,-8); ctx.lineTo(88,24); ctx.lineTo(88,-30); ctx.closePath(); ctx.fill();
+
+    /* ── TAIL SECTION & TAIL LIGHT ── */
+    fp(()=>{
+      ctx.moveTo(-14,-20);
+      ctx.bezierCurveTo(-18,-22, -28,-18, -28,-14);
+      ctx.bezierCurveTo(-28,-10, -22,-10, -16,-14);
+      ctx.bezierCurveTo(-12,-16, -12,-18, -14,-20);
+    }, '#0c1e2c');
+    /* tail light strip */
+    const tlA = .5+.4*Math.sin(t*4);
+    fp(()=>{ ctx.moveTo(-26,-14); ctx.lineTo(-28,-12); ctx.lineTo(-24,-10); ctx.lineTo(-22,-12); ctx.closePath(); }, `rgba(255,40,20,${tlA})`);
+
+    /* ── SEAT UNIT (race hump) ── */
+    fp(()=>{
+      ctx.moveTo(-14,-20);
+      ctx.bezierCurveTo(-12,-24, -4,-26, 2,-24);
+      ctx.bezierCurveTo(4,-23, 2,-20, -2,-20);
+      ctx.bezierCurveTo(-6,-20, -12,-20, -14,-20);
+    }, '#091828');
+    /* seat surface */
+    fp(()=>{
+      ctx.moveTo(-12,-21);
+      ctx.bezierCurveTo(-8,-24, -2,-25, 0,-23);
+      ctx.bezierCurveTo(-2,-21, -8,-21, -12,-21);
+    }, '#0e2030');
+
+    /* ── FRONT FORK (USD — upside-down) ── */
+    sp(()=>{ ctx.moveTo(14,-20); ctx.lineTo(26,0); }, '#3a5868', 5);
+    sp(()=>{ ctx.moveTo(16,-20); ctx.lineTo(26,0); }, '#6a8898', 2);
+    /* fork brace */
+    sp(()=>{ ctx.moveTo(18,-10); ctx.lineTo(24,-4); }, '#4a6878', 2);
+
+    /* ── CLIP-ON HANDLEBARS ── */
+    sp(()=>{ ctx.moveTo(14,-20); ctx.lineTo(10,-24); }, '#3a5060', 3);
+    sp(()=>{ ctx.moveTo(8,-23); ctx.lineTo(13,-25); }, '#6a8898', 2);
+
+    /* ── RIDER (full tuck, race position) ── */
+    const rLean = boosted ? .42 : .28; /* how far forward rider tucks */
+    ctx.save();
+    ctx.translate(-4, -22);
+    ctx.rotate(-rLean);
+
+    /* ---- LOWER BODY ---- */
+    /* thighs gripping tank */
+    fp(()=>{
+      ctx.moveTo(-2,2); ctx.bezierCurveTo(-6,2,-10,6,-10,12);
+      ctx.lineTo(-4,12); ctx.bezierCurveTo(-2,8,0,4,-2,2);
+    }, '#0c1e2e');
+    fp(()=>{
+      ctx.moveTo(4,2); ctx.bezierCurveTo(8,2,10,6,10,12);
+      ctx.lineTo(4,12); ctx.bezierCurveTo(2,8,0,4,4,2);
+    }, '#0c1e2e');
+    /* knee sliders */
+    fp(()=>{ ctx.arc(-8,10,3.5,0,Math.PI*2); }, '#1a3048');
+    fp(()=>{ ctx.arc(-8,10,2,0,Math.PI*2); }, '#00e5ff');
+    /* boots */
+    fp(()=>{ ctx.moveTo(-12,10); ctx.lineTo(-14,16); ctx.lineTo(-6,16); ctx.lineTo(-6,10); ctx.closePath(); }, '#111');
+    /* boot sole */
+    fp(()=>{ ctx.moveTo(-14,15); ctx.lineTo(-14,17); ctx.lineTo(-5,17); ctx.lineTo(-5,15); ctx.closePath(); }, '#222');
+
+    /* ---- TORSO (tucked forward, parallel to bike) ---- */
+    /* racing leathers - main */
+    fp(()=>{
+      ctx.moveTo(-6,2); ctx.bezierCurveTo(-8,0,-10,-8,-6,-16);
+      ctx.lineTo(6,-16); ctx.bezierCurveTo(10,-8,8,0,6,2);
+      ctx.closePath();
+    }, '#0e2032');
+    /* leather panel detail */
+    fp(()=>{
+      ctx.moveTo(-4,0); ctx.bezierCurveTo(-6,-2,-7,-8,-4,-14);
+      ctx.lineTo(4,-14); ctx.bezierCurveTo(7,-8,6,-2,4,0);
+      ctx.closePath();
+    }, 'rgba(0,229,255,.12)');
+    /* chest protector hump */
+    fp(()=>{
+      ctx.moveTo(-5,-8); ctx.bezierCurveTo(-6,-14,-2,-18,0,-18);
+      ctx.bezierCurveTo(2,-18,6,-14,5,-8);
+      ctx.bezierCurveTo(2,-6,-2,-6,-5,-8);
+    }, '#142840');
+
+    /* ---- ARMS (stretched to clip-ons) ---- */
+    ctx.lineCap='round';
+    /* upper arm */
+    sp(()=>{ ctx.moveTo(4,-12); ctx.quadraticCurveTo(10,-10,14,-6); }, '#0e2032', 5);
+    /* forearm tucked flat */
+    sp(()=>{ ctx.moveTo(14,-6); ctx.lineTo(14,-2); }, '#0e2032', 4);
+    ctx.lineCap='butt';
+    /* glove */
+    fp(()=>{ ctx.arc(14,-2,4,0,Math.PI*2); }, '#111');
+    fp(()=>{ ctx.arc(14,-2,2,0,Math.PI*2); }, '#1a1a1a');
+
+    /* ---- FULL-FACE HELMET (green race lid) ---- */
+    /* shell */
+    fp(()=>{ ctx.ellipse(0,-22,12,13,.15,0,Math.PI*2); }, '#1c7a26');
+    /* darker rear section */
+    fp(()=>{ ctx.ellipse(-4,-22,7,11,.05,Math.PI*.55,Math.PI*1.6); }, '#145a1c');
+    /* chin guard */
+    fp(()=>{ ctx.ellipse(3,-16,8,6,.1,0,Math.PI); }, '#114418');
+    /* chin guard vent slot */
+    fp(()=>{ ctx.moveTo(-1,-14); ctx.lineTo(5,-14); ctx.lineTo(5,-12); ctx.lineTo(-1,-12); ctx.closePath(); }, '#061010');
+    /* visor - dark iridescent */
+    fp(()=>{ ctx.ellipse(4,-22,9,7,.18,-.25,Math.PI+.25); }, 'rgba(0,20,15,.88)');
+    /* visor top glint */
+    fp(()=>{ ctx.ellipse(1,-26,6,2,.1,0,Math.PI*2); }, 'rgba(0,229,255,.32)');
+    /* visor edge trim */
+    sp(()=>{ ctx.ellipse(4,-22,9,7,.18,-.25,Math.PI+.25); }, 'rgba(0,229,255,.2)', 1);
+    /* small spec glint */
+    fp(()=>{ ctx.ellipse(8,-26,2,.8,.2,0,Math.PI*2); }, 'rgba(255,255,255,.2)');
+    /* green racing stripe on helmet */
+    fp(()=>{
+      ctx.moveTo(-8,-28); ctx.bezierCurveTo(-2,-34,4,-34,8,-28);
+      ctx.bezierCurveTo(6,-26,2,-26,-2,-26);
+      ctx.bezierCurveTo(-4,-27,-7,-28,-8,-28);
+    }, '#2aaa36');
+    /* vent on top */
+    fp(()=>{ ctx.moveTo(-2,-32); ctx.lineTo(2,-32); ctx.lineTo(2,-30); ctx.lineTo(-2,-30); ctx.closePath(); }, '#061010');
+    /* side vent bar */
+    fp(()=>{ ctx.moveTo(-10,-24); ctx.lineTo(-10,-20); ctx.lineTo(-8,-20); ctx.lineTo(-8,-24); ctx.closePath(); }, 'rgba(39,255,20,.5)');
+    /* rear spoiler bump on lid */
+    fp(()=>{
+      ctx.moveTo(-10,-26); ctx.bezierCurveTo(-14,-26,-14,-22,-10,-22);
+      ctx.bezierCurveTo(-8,-22,-8,-26,-10,-26);
+    }, '#114418');
+
+    ctx.restore(); /* rider */
+    ctx.restore(); /* scale + translate */
+  }
+
+  /* ── SPEED LINES ── */
+  function drawSpeedLines(){
+    if(!boosted) return;
+    ctx.strokeStyle='rgba(0,229,255,.07)'; ctx.lineWidth=1;
+    for(let i=0;i<10;i++){
+      const sy=groundY*.2+Math.random()*groundY*.55;
+      const len=50+Math.random()*90;
+      const x0=BX-30-Math.random()*80;
+      ctx.beginPath(); ctx.moveTo(x0,sy); ctx.lineTo(x0-len,sy); ctx.stroke();
+    }
+  }
+
+  /* ── PARTICLES ── */
+  function drawParticles(){
+    particles.forEach(p=>{
+      ctx.fillStyle=`rgba(0,229,255,${p.life*.45})`;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.life*2.2,0,Math.PI*2); ctx.fill();
+    });
+  }
+
+  /* ── HUD ── */
+  function drawHUD(){
+    const kmh=Math.round(speed/2.8*120);
+    ctx.font=`bold 11px 'Share Tech Mono',monospace`;
+    ctx.fillStyle=boosted?'#39ff14':'#00e5ff';
+    ctx.fillText(`${kmh} KM/H`,14,18);
+    ctx.font=`9px 'Share Tech Mono',monospace`;
+    ctx.fillStyle='rgba(0,229,255,.4)';
+    ctx.fillText(boosted?'TURBO MODE':'CRUISE',14,32);
+
+    /* hover hint */
+    if(!boosted){
+      ctx.fillStyle='rgba(0,229,255,.18)';
+      ctx.font=`8px 'Share Tech Mono',monospace`;
+      ctx.fillText('HOVER TO BOOST',W-118,18);
+    }
+  }
+
+  /* roundRect polyfill */
+  if(!CanvasRenderingContext2D.prototype.roundRect){
+    CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+      this.beginPath();this.moveTo(x+r,y);this.lineTo(x+w-r,y);this.quadraticCurveTo(x+w,y,x+w,y+r);
+      this.lineTo(x+w,y+h-r);this.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+      this.lineTo(x+r,y+h);this.quadraticCurveTo(x,y+h,x,y+h-r);
+      this.lineTo(x,y+r);this.quadraticCurveTo(x,y,x+r,y);this.closePath();
+    };
+  }
+
+  /* ── LOOP ── */
+  let last=0;
+  function loop(ts){
+    const dt=Math.min((ts-last)/1000,.05); last=ts;
+    speed+=(targetSpd-speed)*.065;
+    scrollX+=speed;
+
+    const ty=groundAt(scrollX+BX)-2;
+    bikerVY+=(ty-bikerY)*.28; bikerVY*=.74; bikerY+=bikerVY;
+    wheelAngle+=speed*.07; bobPhase+=speed*.045;
+
+    /* extend terrain */
+    const last2=segments[segments.length-1];
+    if(last2 && sx(last2.startX+last2.width)<W*2){
+      const nt=TYPES[typeIdx++%TYPES.length];
+      const ns=makeSegment(nt,last2.startX+last2.width);
+      segments.push(ns);
+      segCursor=ns.startX+ns.width;
+    }
+    segments=segments.filter(s=>sx(s.startX+s.width)>-80);
+
+    addParticle();
+    particles.forEach(p=>{ p.x+=p.vx; p.y+=p.vy; p.life-=.038; });
+    particles=particles.filter(p=>p.life>0);
+
+    ctx.clearRect(0,0,W,H);
+    drawSky();
+    drawStars(dt);
+    drawFarMtns();
+    drawMidHills();
+
+    /* base ground colour */
+    ctx.fillStyle='#040c04'; ctx.fillRect(0,groundY,W,H-groundY);
+
+    segments.forEach(s=>{ if(sx(s.startX+s.width)>0 && sx(s.startX)<W) drawSeg(s); });
+    drawSpeedLines();
+    drawParticles();
+    drawBiker(ts/1000);
+    drawHUD();
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
   // Custom cursor
   const dot = document.getElementById('cursorDot');
   document.addEventListener('mousemove', e => {
@@ -1609,12 +2257,4 @@
     if (e.key === code[pos]) {
       pos++;
       if (pos === code.length) {
-        document.body.style.filter = 'hue-rotate(180deg)';
-        setTimeout(() => document.body.style.filter = '', 2000);
-        pos = 0;
-      }
-    } else { pos = 0; }
-  });
-</script>
-</body>
-</html>
+        document.body.style.filter = 'hue-rotate(180deg)'
